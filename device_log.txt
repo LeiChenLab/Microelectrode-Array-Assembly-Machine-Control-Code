@@ -1,0 +1,74 @@
+2024-11-05 16:36:55,688 - Motor Controller response: X+100
+2024-11-05 16:36:56,736 - Motor Controller response: X+100
+2024-11-05 16:36:58,945 - Motor Controller response: X+100
+2024-11-05 16:36:59,904 - Motor Controller response: X+100
+2024-11-05 16:37:01,328 - Motor Controller response: X+100
+2024-11-05 16:37:03,816 - Motor Controller response: X-100
+2024-11-05 16:37:04,784 - Motor Controller response: X-100
+2024-11-05 16:37:08,912 - Motor Controller response: STOP
+2024-11-05 16:37:09,576 - Relay Controller response: Arduino is ready to receive commands.
+Received command: Laser_Relay_On
+Relay turned ON
+2024-11-05 16:37:10,184 - Relay Controller response: Received command: Laser_Relay_Off
+Relay turned OFF
+2024-11-05 16:37:16,641 - Motor Controller response: Z+100
+2024-11-05 16:37:19,040 - Motor Controller response: Z-100
+2024-11-05 16:46:28,841 - Relay Controller response: Arduino is ready to receive commands.
+Received command: Laser_Relay_Off
+Relay turned OFF
+2024-11-05 16:46:29,706 - Relay Controller response: Received command: Laser_Relay_On
+Relay turned ON
+2024-11-05 16:46:30,690 - Relay Controller response: Received command: Laser_Relay_Off
+Relay turned OFF
+2024-11-05 16:46:31,713 - Relay Controller response: Received command: Laser_Relay_On
+Relay turned ON
+2024-11-05 16:46:32,776 - Relay Controller response: Received command: Laser_Relay_Off
+Relay turned OFF
+2024-11-05 16:46:34,849 - Relay Controller response: Received command: Laser_Relay_On
+Relay turned ON
+2024-11-05 16:46:35,649 - Relay Controller response: Received command: Laser_Relay_Off
+Relay turned OFF
+2024-11-05 16:47:09,659 - Motor Controller response: X+150
+2024-11-05 17:03:04,529 - Motor Controller response: X+50
+2024-11-05 17:03:07,281 - Motor Controller response: X+50
+2024-11-05 17:03:13,113 - Motor Controller response: X-50
+2024-11-05 17:03:13,634 - Motor Controller response: X-50
+2024-11-05 17:03:14,186 - Motor Controller response: X-50
+2024-11-05 17:03:20,033 - Motor Controller response: Z-50
+2024-11-05 17:03:20,641 - Motor Controller response: Z-50
+2024-11-05 17:14:17,609 - Motor Controller response: X+100
+2024-11-05 17:14:19,249 - Motor Controller response: X+100
+2024-11-05 17:14:20,802 - Motor Controller response: X+100
+2024-11-05 17:14:24,769 - Motor Controller response: X-100
+2024-11-05 17:14:25,721 - Motor Controller response: X-100
+2024-11-05 17:14:31,874 - Motor Controller response: X-100
+2024-11-05 17:15:17,313 - Relay Controller response: Arduino is ready to receive commands.
+Received command: Laser_Relay_On
+Relay turned ON
+2024-11-05 17:15:18,049 - Relay Controller response: Received command: Laser_Relay_Off
+Relay turned OFF
+2024-11-05 17:16:52,299 - Connected successfully to Motor Controller on COM5
+2024-11-05 17:16:52,306 - Connected successfully to Relay Controller on COM4
+2024-11-05 17:17:19,828 - Sent command to Motor Controller: X+100
+2024-11-05 17:17:19,929 - Motor Controller response: X+100
+2024-11-05 17:17:21,406 - Sent command to Motor Controller: X+100
+2024-11-05 17:17:21,507 - Motor Controller response: X+100
+2024-11-05 17:17:22,636 - Sent command to Motor Controller: X+100
+2024-11-05 17:17:22,738 - Motor Controller response: X+100
+2024-11-05 17:17:24,665 - Sent command to Relay Controller: Laser_Relay_On
+2024-11-05 17:17:24,771 - Relay Controller response: Arduino is ready to receive commands.
+Received command: Laser_Relay_On
+Relay turned ON
+2024-11-05 17:17:25,221 - Sent command to Relay Controller: Laser_Relay_Off
+2024-11-05 17:17:25,323 - Relay Controller response: Received command: Laser_Relay_Off
+Relay turned OFF
+2024-11-05 17:17:26,349 - Sent command to Motor Controller: STOP
+2024-11-05 17:17:26,450 - Motor Controller response: STOP
+2024-11-05 17:17:26,875 - Sent command to Motor Controller: X+100
+2024-11-05 17:17:26,978 - Motor Controller response: X+100
+2024-11-05 17:17:27,646 - Connected successfully to Motor Controller on COM5
+2024-11-05 17:17:27,651 - Connected successfully to Relay Controller on COM4
+2024-11-05 17:17:29,253 - Sent command to Motor Controller: X-100
+2024-11-05 17:17:29,363 - Motor Controller response: X-100
+2024-11-05 17:17:29,836 - Sent command to Motor Controller: X-100
+2024-11-05 17:17:29,939 - Motor Controller response: X-100

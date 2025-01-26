@@ -1,0 +1,325 @@
+##GUI##
+import cv2
+import serial
+import threading
+import tkinter as tk
+from tkinter import simpledialog
+
+# Serial communication setup
+def connect_to_motor():
+    ser = serial.Serial('COM9', 9600, timeout=1)
+    return ser
+
+# Motor control based on PCB position
+def move_motor_based_on_position(ser, position, frame_center, movement_threshold):
+    x, y = position
+    frame_x, frame_y = frame_center
+
+    if abs(x - frame_x) > movement_threshold:
+        if x < frame_x:
+            ser.write(b'right\n')
+        else:
+            ser.write(b'left\n')
+
+    if abs(y - frame_y) > movement_threshold:
+        if y < frame_y:
+            ser.write(b'up\n')
+        else:
+            ser.write(b'down\n')
+
+# PCB detection function
+def detect_pcb(frame):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    lower_green = (35, 100, 100)
+    upper_green = (85, 255, 255)
+    mask = cv2.inRange(hsv, lower_green, upper_green)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if contours:
+        largest_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest_contour)
+        return (x + w // 2, y + h // 2), largest_contour
+    return None, None
+
+# Function to start motor control
+def start_motor_control(movement_threshold):
+    ser = connect_to_motor()
+    cap = cv2.VideoCapture(0)
+
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
+
+        pcb_center, pcb_contour = detect_pcb(frame)
+        frame_center = (frame.shape[1] // 2, frame.shape[0] // 2)
+
+        if pcb_contour is not None:
+            cv2.drawContours(frame, [pcb_contour], -1, (0, 255, 0), 2)
+            cv2.circle(frame, pcb_center, 5, (255, 0, 0), -1)
+
+        if pcb_center:
+            move_motor_based_on_position(ser, pcb_center, frame_center, movement_threshold)
+
+        cv2.imshow("PCB Detection", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    ser.close()
+
+# Function to stop motor control
+def stop_motor_control():
+    stop_event.set()
+
+# Tkinter GUI setup
+def launch_gui():
+    global stop_event
+    stop_event = threading.Event()
+
+    root = tk.Tk()
+    root.title("Motor Control Interface")
+
+    def start_control():
+        movement_threshold = simpledialog.askinteger("Input", "Enter movement threshold:")
+        stop_event.clear()
+        threading.Thread(target=start_motor_control, args=(movement_threshold,)).start()
+
+    def stop_control():
+        stop_motor_control()
+
+    start_button = tk.Button(root, text="Start Motor Control", command=start_control)
+    start_button.pack(pady=10)
+
+    stop_button = tk.Button(root, text="Stop Motor Control", command=stop_control)
+    stop_button.pack(pady=10)
+
+    root.mainloop()
+
+if __name__ == "__main__":
+    launch_gui()
+
+
+
+
+
+
+
+
+
+
+
+
+
+##detect##
+import cv2
+import serial
+import time
+
+# Serial communication setup
+def connect_to_motor():
+    ser = serial.Serial('COM9', 9600, timeout=1)  # Adjust COM port as needed
+    time.sleep(2)  # Give some time for connection to establish
+    return ser
+
+# Motor control based on PCB position
+def move_motor_based_on_position(ser, position, frame_center):
+    x, y = position
+    frame_x, frame_y = frame_center
+
+    # Simple logic: If PCB is to the left, move motor to the right and vice versa
+    if x < frame_x - 20:  # PCB is to the left
+        ser.write(b'right\n')  # Send command to move motor to the right
+        print("Moving right")
+    elif x > frame_x + 20:  # PCB is to the right
+        ser.write(b'left\n')  # Send command to move motor to the left
+        print("Moving left")
+
+    # Similarly for up and down
+    if y < frame_y - 20:  # PCB is above center
+        ser.write(b'up\n')  # Send command to move motor up
+        print("Moving up")
+    elif y > frame_y + 20:  # PCB is below center
+        ser.write(b'down\n')  # Send command to move motor down
+        print("Moving down")
+
+# PCB detection function using color filtering or shape detection
+def detect_pcb(frame):
+    # Convert frame to HSV for better color detection
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # Define PCB color range in HSV
+    lower_green = (35, 100, 100)
+    upper_green = (85, 255, 255)
+
+    # Create a mask for PCB color
+    mask = cv2.inRange(hsv, lower_green, upper_green)
+
+    # Find contours in the mask
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if contours:
+        # Find the largest contour (assuming it's the PCB)
+        largest_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest_contour)
+        return (x + w // 2, y + h // 2), largest_contour  # Return center of the PCB and contour
+    return None, None
+
+# Main function to handle camera feed and motor control
+def main():
+    ser = connect_to_motor()  # Connect to motor controller
+    cap = cv2.VideoCapture(0)  # Open the camera (index 0)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
+
+        # Detect the PCB in the current frame
+        pcb_center, pcb_contour = detect_pcb(frame)
+        frame_center = (frame.shape[1] // 2, frame.shape[0] // 2)
+
+        # Draw the detected PCB and frame center for visualization
+        if pcb_contour is not None:
+            cv2.drawContours(frame, [pcb_contour], -1, (0, 255, 0), 2)
+            cv2.circle(frame, pcb_center, 5, (255, 0, 0), -1)  # Mark PCB center
+
+        # Move the motor based on PCB position
+        if pcb_center:
+            move_motor_based_on_position(ser, pcb_center, frame_center)
+
+        # Display the frame
+        cv2.imshow("PCB Detection", frame)
+
+        # Break the loop if 'q' is pressed
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Clean up
+    cap.release()
+    cv2.destroyAllWindows()
+    ser.close()
+
+if __name__ == "__main__":
+    main()
+
+
+
+##arduino###
+const int motorPin = 9;  // Motor connected to pin 9 (PWM)
+const int ledPin = 13;   // LED connected to pin 13
+
+void setup() {
+  // Initialize motor and LED pins as output
+  pinMode(motorPin, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+
+  // Start with motor and LED off
+  analogWrite(motorPin, 0);
+  digitalWrite(ledPin, LOW);
+
+  // Begin serial communication
+  Serial.begin(9600);
+}
+
+void loop() {
+  if (Serial.available()) {
+    char command = Serial.read();
+
+    // LED Control
+    if (command == 'L') {
+      digitalWrite(ledPin, HIGH);  // Turn LED on
+    } else if (command == 'l') {
+      digitalWrite(ledPin, LOW);   // Turn LED off
+    }
+
+    // Motor Control
+    else if (command == 'M') {
+      int speed = Serial.parseInt();  // Read motor speed value
+      analogWrite(motorPin, speed);   // Set motor speed using PWM
+    } else if (command == 'm') {
+      analogWrite(motorPin, 0);       // Turn motor off
+    }
+  }
+}
+
+
+
+
+##arduino GUI###
+import tkinter as tk
+import serial
+import time
+
+# Serial communication setup
+def connect_to_arduino(port, baud_rate=9600):
+    try:
+        ser = serial.Serial(port, baud_rate, timeout=1)
+        time.sleep(2)  # Wait for the connection to establish
+        return ser
+    except serial.SerialException:
+        print("Could not connect to the Arduino.")
+        return None
+
+# Control LED On
+def led_on():
+    if ser is not None:
+        ser.write(b'L')  # Send 'L' to turn LED on
+
+# Control LED Off
+def led_off():
+    if ser is not None:
+        ser.write(b'l')  # Send 'l' to turn LED off
+
+# Motor On with a set speed
+def motor_on(speed):
+    if ser is not None:
+        ser.write(b'M')  # Send 'M' to indicate motor control
+        ser.write(str(speed).encode() + b'\n')  # Send the motor speed
+
+# Motor Off
+def motor_off():
+    if ser is not None:
+        ser.write(b'm')  # Send 'm' to stop the motor
+
+# GUI Setup
+def create_gui():
+    root = tk.Tk()
+    root.title("Motor & LED Controller")
+
+    # LED Controls
+    tk.Label(root, text="LED Control").grid(row=0, column=0, pady=10)
+    tk.Button(root, text="Turn LED ON", command=led_on).grid(row=1, column=0)
+    tk.Button(root, text="Turn LED OFF", command=led_off).grid(row=1, column=1)
+
+    # Motor Controls
+    tk.Label(root, text="Motor Control").grid(row=2, column=0, pady=10)
+    tk.Button(root, text="Turn Motor ON", command=lambda: motor_on(speed_slider.get())).grid(row=3, column=0)
+    tk.Button(root, text="Turn Motor OFF", command=motor_off).grid(row=3, column=1)
+
+    # Speed Control Slider
+    tk.Label(root, text="Motor Speed (0-255)").grid(row=4, column=0, pady=10)
+    global speed_slider
+    speed_slider = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL)
+    speed_slider.grid(row=5, column=0, columnspan=2)
+
+    # Exit Button
+    tk.Button(root, text="Exit", command=root.quit).grid(row=6, column=0, columnspan=2, pady=10)
+
+    root.mainloop()
+
+if __name__ == "__main__":
+    # Connect to Arduino
+    port = "COM3"  # Change this to the correct port for your Arduino
+    ser = connect_to_arduino(port)
+
+    # Run the GUI
+    create_gui()
+
+    # Close the serial connection when the GUI is closed
+    if ser is not None:
+        ser.close()

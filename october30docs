@@ -1,0 +1,384 @@
+#camera_manger.py
+import cv2
+
+class CameraManager:
+    def __init__(self, index):
+        self.index = index
+        self.cap = cv2.VideoCapture(index)  # Opens the camera
+
+    def open_camera(self):
+        """Open camera and display frames until 'q' is pressed."""
+        if not self.cap.isOpened():
+            print(f"Cannot open camera {self.index}")
+            return
+
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                print(f"Failed to grab frame from camera {self.index}")
+                break
+
+            cv2.imshow(f"Camera {self.index}", frame)  # Corrected from self.indec
+
+            # Exit on 'q'
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        self.cap.release()
+        cv2.destroyAllWindows()  # Corrected from cv2.destroyALLWindows()
+
+    def detect_pcb(self, frame):
+        """Detect PCB using color filtering in the given frame."""
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        lower_green = (35, 100, 100)
+        upper_green = (85, 255, 255)
+
+        # Create a mask to isolate green areas
+        mask = cv2.inRange(hsv, lower_green, upper_green)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours:
+            # Find the largest contour and calculate its center
+            largest_contour = max(contours, key=cv2.contourArea)  # Corrected from cv2.ontourArea
+            x, y, w, h = cv2.boundingRect(largest_contour)
+            return (x + w // 2, y + h // 2), largest_contour  # Return center of PCB and contour
+
+        return None, None  # Return None if no contours are found
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+wire_manager.py
+# wire_detector.py
+
+import cv2
+import numpy as np
+
+class WireDetector:
+    def __init__(self, camera_index, lower_color=np.array([100, 150, 0]), upper_color=np.array([140, 255, 255])):
+        """
+        Initialize WireDetector with camera index and color range for wire detection.
+        
+        :param camera_index: Index of the camera to use.
+        :param lower_color: Lower HSV color range for detecting the wire.
+        :param upper_color: Upper HSV color range for detecting the wire.
+        """
+        self.camera_index = camera_index
+        self.lower_color = lower_color
+        self.upper_color = upper_color
+
+    def find_wire_tip(self):
+        """Capture from the camera and detect the tip of the wire."""
+        cap = cv2.VideoCapture(self.camera_index)
+        if not cap.isOpened():
+            print(f"Cannot open camera {self.camera_index}")
+            return None
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Failed to grab frame")
+                break
+
+            wire_tip = self.detect_wire_tip(frame)
+            if wire_tip:
+                # Draw a circle at the wire tip
+                cv2.circle(frame, wire_tip, 5, (0, 255, 0), -1)
+                cv2.imshow(f"Wire Detection - Camera {self.camera_index}", frame)
+            else:
+                cv2.imshow(f"Wire Detection - Camera {self.camera_index}", frame)
+
+            # Check for 'q' key to quit
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+    def detect_wire_tip(self, frame):
+        """Detect the tip of the wire in the given frame."""
+        # Convert frame to HSV color space
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        
+        # Create a binary mask based on the color range
+        mask = cv2.inRange(hsv, self.lower_color, self.upper_color)
+
+        # Find contours in the mask
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            # Find the largest contour and calculate its bounding box
+            largest_contour = max(contours, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(largest_contour)
+            return (x + w // 2, y + h // 2)  # Return the center of the wire tip
+
+        return None
+
+
+
+
+
+
+
+
+
+motor_controller.py
+import serial
+import threading
+from queue import Queue  # Correct import for Queue
+from tkinter import messagebox
+
+class MotorController:  # Handles motor control via serial
+    def __init__(self, port):
+        """Initialize motor controller and establish serial connection."""
+        self.serial_lock = threading.Lock()  # Thread connection to serial
+        self.command_queue = Queue()  # Queue (FIFO) to store motor commands
+
+        try:
+            # Connection attempt
+            self.ser = serial.Serial(port, 9600, timeout=2)
+            print(f"Connected to {port}")
+        except serial.SerialException as e:
+            print(f"Connection error: {e}")
+            messagebox.showerror("Error", f"Failed to connect to {port}")
+            self.ser = None  # No valid connection is established
+
+        # Axis config dictionary
+        self.axis_config = ['X', 'Y', 'Z', 'T', 'r']
+        self.valid_direction = ['+', '-']
+
+    def send_command(self, command):
+        """Send command to motor using serial connection."""
+        if self.ser:
+            try:
+                with self.serial_lock:
+                    self.ser.write((command + '\n').encode())  # Encode to convert string to bytes
+                    print(f"Sent: {command.strip()}")  # Remove leading or trailing whitespace from command
+            except serial.SerialException as e:
+                print(f"Failed to send command: {e}")
+
+    def convert_degrees_to_pulses(self, degrees):
+        """Convert degrees to stepper motor pulses."""
+        STEPPER_ANGLE_DEG = 1.8
+        TRANSMISSION_RATIO = 180
+        SUBDIVISION = 2
+        PULSE_EQUIVALENT = STEPPER_ANGLE_DEG / (TRANSMISSION_RATIO * SUBDIVISION)
+        pulses = round(degrees / PULSE_EQUIVALENT)  # Use lowercase 'pulses' variable
+        print(f"Converted {degrees} degrees to {pulses} pulses.")
+        return pulses  # Return correct variable
+
+    def move_towards_wire(self, wire_tip):
+        """Move the motor stage towards the detected wire tip."""
+        if wire_tip:
+            x, y = wire_tip  # Get the coordinates of the detected wire tip
+
+            # Assume the camera view is 640x480 pixels
+            frame_width = 640
+            frame_height = 480
+            center_x = frame_width // 2
+            center_y = frame_height // 2
+
+            # Define hysteresis values (tolerance range)
+            hysteresis = 20  # Tolerance in pixels
+
+            # Calculate x and y offsets from the center
+            x_offset = x - center_x
+            y_offset = y - center_y
+
+            # Movement logic based on offsets
+            if abs(x_offset) > hysteresis:  # Check if the x offset is outside the hysteresis range
+                direction_x = '+' if x_offset > 0 else '-'  # Determine direction
+                self.queue_command(f"X{direction_x}{abs(x_offset)}")  # Move in the X direction
+
+            if abs(y_offset) > hysteresis:  # Check if the y offset is outside the hysteresis range
+                direction_y = '+' if y_offset > 0 else '-'  # Determine direction
+                self.queue_command(f"Y{direction_y}{abs(y_offset)}")  # Move in the Y direction
+
+            print(f"Moving towards wire tip at position: {wire_tip}")
+
+    def queue_movement_matrix(self, matrix):
+        """Queue a matrix of movement commands."""
+        for row in matrix:
+            axis, direction, displacement = row
+            if axis not in self.axis_config or direction not in self.valid_direction:
+                raise ValueError(f"Invalid axis or direction: {axis}, {direction}")
+            # Handle rotary stage
+            if axis == 'r':
+                displacement = self.convert_degrees_to_pulses(displacement)  # Convert degrees to pulses
+            command = f"{axis}{direction}{int(displacement)}"  # Corrected string formatting
+            self.queue_command(command)
+
+    def queue_command(self, command):
+        """Add command to queue."""
+        self.command_queue.put(command)
+        print(f"Queued Command: {command}")
+
+    def send_next_command(self):
+        """Send the next command in the queue to the motor."""
+        if not self.ser:
+            print("Error: Not connected to a device.")
+            return
+        if not self.command_queue.empty():
+            command = self.command_queue.get()
+            try:
+                with self.serial_lock:
+                    self.ser.write(command.encode())
+                    print(f"Sent: {command.strip()}")
+            except serial.SerialException as e:
+                print(f"Failed to send command: {e}")
+
+    def stop_motor_control(self):
+        """Stop the motor control."""
+        if self.ser:
+            self.queue_command("STOP\n")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+main.py
+
+
+import threading
+from motor_controller import MotorController
+from camera_manager import CameraManager
+from gui_interface import MotorControllerGUI
+import tkinter as tk
+from wire_detector import WireDetector
+
+def main():
+    #initialize and run the motor controll application
+    motor_controller = MotorController("COM4")#default port
+
+    #start command processing thread
+    threading.Thread(target=motor_controller.process_commands,deamon=True),start()
+
+    #start camera threads
+    camera_0=CameraManager(0)
+    camera_1 = CameraManager(1)
+
+    ##daemon is for tasks that should run in bg and not wait for their completion
+    threading.Thread(target=camera_0.open_camera,daemon=True).start()
+    threading.Thread(target=camera_1.open_camera,daemon=True).start()
+
+    #Initialize the wire detector
+    wire_detector=WireDetector(camera_index=0)
+
+    #start thread for wire dection
+    threading .Thread(target=wire_detector.find_wire_tip,daemon=True).start()
+
+    ##launch GUI
+    root=tk.Tk()
+    app=MotorControllerGUI(root,motor_controller)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+gui_interface
+import tkinter as tk
+from tkinter import messagebox
+from motor_controller import MotorController
+import tkinter.font as tkFont
+
+class MotorControllerGUI:
+    """Create and manage motor control GUI."""
+    
+    def __init__(self, root, motor_controller):
+        """Initialize GUI with the given motor controller."""
+        self.motor_controller = motor_controller
+        root.title("Motor Control Interface")
+        root.geometry("400x300")  # Set window size
+        self.create_widgets(root)
+
+    def create_widgets(self, root):
+        """Create GUI components."""
+        # Custom Font
+        font_style = tkFont.Font(family="Helvetica", size=12)
+
+        # COM Port Section
+        tk.Label(root, text="COM Port:", font=font_style).grid(row=0, column=0, padx=5, pady=5, sticky='w')
+        self.port_entry = tk.Entry(root)
+        self.port_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        tk.Button(root, text="Connect", command=self.connect, bg='green', fg='white').grid(row=0, column=2, padx=5, pady=5)
+
+        # Axis Input
+        tk.Label(root, text="Axis (X, Y, Z, T, r):", font=font_style).grid(row=1, column=0, padx=5, pady=5, sticky='w')
+        self.axis_entry = tk.Entry(root)
+        self.axis_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        # Direction Input
+        self.direction_var = tk.StringVar(value='+')
+        tk.Radiobutton(root, text='Positive (+)', variable=self.direction_var, value='+').grid(row=2, column=0, padx=5, pady=5, sticky='w')
+        tk.Radiobutton(root, text='Negative (-)', variable=self.direction_var, value='-').grid(row=2, column=1, padx=5, pady=5, sticky='w')
+
+        # Displacement Input
+        tk.Label(root, text="Displacement:", font=font_style).grid(row=3, column=0, padx=5, pady=5, sticky='w')
+        self.displacement_entry = tk.Entry(root)
+        self.displacement_entry.grid(row=3, column=1, padx=5, pady=5)
+
+        # Control Buttons
+        tk.Button(root, text="Move Stage", command=self.move_stage, bg='blue', fg='white').grid(row=4, column=0, columnspan=2, padx=5, pady=10)
+        tk.Button(root, text="Stop Motor", command=self.stop_motor, bg='red', fg='white').grid(row=5, column=0, columnspan=2, padx=5, pady=10)
+
+    def connect(self):
+        """Connect using entered COM Port."""
+        port = self.port_entry.get().strip()
+        self.motor_controller = MotorController(port)  # Create a new instance
+
+    def move_stage(self):
+        """Move the motor stage based on user inputs."""
+        try:
+            axis = self.axis_entry.get().strip()
+            direction = self.direction_var.get()
+            displacement = int(self.displacement_entry.get().strip())
+            self.motor_controller.move_linear_stage(axis, direction, displacement)
+        except ValueError as e:
+            messagebox.showerror("Error", f"Invalid Input: {e}")
+
+    def stop_motor(self):
+        """Stop the motor."""
+        self.motor_controller.stop_motor()
+
+
+
+
+
+
+
+
+
