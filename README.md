@@ -1,2 +1,2 @@
 # MicroelectrodeArrayMachine
-Python Code for Capstone Project
+Repository for Capstone Project
