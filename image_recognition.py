@@ -479,16 +479,20 @@ def analyze_cf_gc_angle():
 # --------------------------------------------------------
 # EXTRUDE: measure distance in µm using compute_steps_per_pixel
 # --------------------------------------------------------
-def extrude(target_pad_number=1, max_iterations=20, known_µm=None, tolerance_µm=250):
+def extrude(target_pad_number=1, max_iterations=20, known_µm=None, tolerance_µm=250,
+            initial_extend=True):
     """
     Moves the 't' axis to align CF_Tip with a specific pad (default: pad1) horizontally
     within a specified tolerance.
-    
+
     Parameters:
     - target_pad_number: The pad number to align with (1-8)
     - max_iterations: Maximum number of attempts
     - known_µm: Known distance in µm between adjacent pads for calibration
     - tolerance_µm: Alignment tolerance in µm
+    - initial_extend: If True (default), extend 't' by 400 steps first to bring
+                      the CF_Tip into camera view.  Set False for repeat calls
+                      within the stabilisation loop where the tip is already visible.
     """
     import time
     from motor_control import update_speed, move_linear_stage, steps_to_µm
@@ -498,15 +502,18 @@ def extrude(target_pad_number=1, max_iterations=20, known_µm=None, tolerance_µ
         known_µm = get_pad_spacing()
 
     print(f"[Extrude] Starting extrude to align CF_Tip with pad{target_pad_number}...")
+    print(f"[Extrude] Using pad spacing for calibration: {known_µm} µm")
 
     global pad_box_dict, last_cf_box
 
     global extrude_done
     extrude_done = False  # reset at start of function
 
-    # 1) Set slow speed for precision and step until CF_Tip is visible to camera0
+    # 1) Optionally extend 't' to bring CF_Tip into camera view.
+    #    Skip on repeat calls within the stabilisation loop (initial_extend=False).
     update_speed(1)
-    move_linear_stage("t", "+", 400, wait_for_stop=True, max_wait=30.0)
+    if initial_extend:
+        move_linear_stage("t", "+", 400, wait_for_stop=True, max_wait=30.0)
     
     # Configuration
     step_size_µm = 100.0
@@ -515,19 +522,19 @@ def extrude(target_pad_number=1, max_iterations=20, known_µm=None, tolerance_µ
 
     # 2) Validate we have required bounding boxes
     target_pad_key = f"pad{target_pad_number}"
-    target_pad_box = pad_box_dict.get(target_pad_number)
+    target_pad_box = pad_box_dict.get(target_pad_key)
     
-    # For calibration we need two adjacent pads
-    cal_pad1_key = f"pad{max(1, target_pad_number)}"  # Use target or one above
-    cal_pad2_key = f"pad{min(8, target_pad_number+1)}"  # Use target or one below
-    
-    # Get the calibration pad boxes
-    #cal_box1 = pad_box_dict.get(cal_pad1_key)
-    #cal_box2 = pad_box_dict.get(cal_pad2_key)
-
-    #Hardcode calibration to pad1 and pad2
-    cal_box1 = pad_box_dict.get("pad1")
-    cal_box2 = pad_box_dict.get("pad2")
+    # For calibration use the target pad and its neighbour — both should be
+    # Calibration pair: target pad and its next neighbour, stepping together with
+    # the pad index.  n1 is clamped at 7 so the pair is always padN/pad(N+1)
+    # and never the same pad twice (which would give 0 px distance).
+    #   pad1 → pad1/pad2 | pad4 → pad4/pad5 | pad8 → pad7/pad8
+    n1 = min(target_pad_number, 7)
+    cal_pad1_key = f"pad{n1}"
+    cal_pad2_key = f"pad{n1 + 1}"
+    cal_box1 = pad_box_dict.get(cal_pad1_key)
+    cal_box2 = pad_box_dict.get(cal_pad2_key)
+    print(f"[Extrude] Calibration pads: {cal_pad1_key} / {cal_pad2_key}")
     
     # Validate we have what we need
     if target_pad_box is None:
@@ -567,10 +574,10 @@ def extrude(target_pad_number=1, max_iterations=20, known_µm=None, tolerance_µ
             print(f"[Extrude] Invalid calibration (steps_pp={steps_pp}) => skip this iteration.")
             continue
 
-        # 5) Calculate horizontal distance between pad and CF_Tip
+        # 5) Calculate horizontal distance between pad centre and CF_Tip.
         (pad_x, pad_y) = center_of_bbox(target_pad_box)
         (cf_x, cf_y) = center_of_bbox(last_cf_box)
-        
+
         # Horizontal distance (positive if CF is right of pad, negative if left)
         delta_x_px = cf_x - pad_x
         
@@ -586,6 +593,8 @@ def extrude(target_pad_number=1, max_iterations=20, known_µm=None, tolerance_µ
         # 6) Check if we're within tolerance
         if delta_µm <= tolerance_µm:
             print(f"[Extrude] Aligned within ±{tolerance_µm}µm. Done.")
+            print("[Extrude] Waiting 1s for vibrations to settle...")
+            time.sleep(1.0)
             extrude_done = True
             return
 
@@ -639,8 +648,9 @@ def x_align(target_pad_number=1, known_µm=None, tolerance_µm=10):
     # If known_µm is not provided, get it from the settings file
     if known_µm is None:
         known_µm = get_pad_spacing()
-      
+
     print(f"[x_align] Starting vertical alignment of CF_Tip with pad{target_pad_number}...")
+    print(f"[x_align] Using pad spacing for calibration: {known_µm} µm")
  
     global pad_box_dict, last_cf_box
     global x_align_done
@@ -650,17 +660,18 @@ def x_align(target_pad_number=1, known_µm=None, tolerance_µm=10):
     target_pad_key = f"pad{target_pad_number}"
     target_pad_box = pad_box_dict.get(target_pad_key)
  
-    # For calibration we need two adjacent pads
-    cal_pad1_key = f"pad{max(1, target_pad_number)}"  # Use target or one above
-    cal_pad2_key = f"pad{min(8, target_pad_number+1)}"  # Use target or one below
- 
-    # Get the calibration pad boxes
-    #cal_box1 = pad_box_dict.get(cal_pad1_key)
-    #cal_box2 = pad_box_dict.get(cal_pad2_key)
- 
-    #Hardcode calibration to pad1 and pad2
-    cal_box1 = pad_box_dict.get("pad1")
-    cal_box2 = pad_box_dict.get("pad2")
+    # For calibration use the target pad and its neighbour — both should be
+    # visible at whatever X position the stage is currently at.
+    # Calibration pair: target pad and its next neighbour, stepping together with
+    # the pad index.  n1 is clamped at 7 so the pair is always padN/pad(N+1)
+    # and never the same pad twice (which would give 0 px distance).
+    #   pad1 → pad1/pad2 | pad4 → pad4/pad5 | pad8 → pad7/pad8
+    n1 = min(target_pad_number, 7)
+    cal_pad1_key = f"pad{n1}"
+    cal_pad2_key = f"pad{n1 + 1}"
+    cal_box1 = pad_box_dict.get(cal_pad1_key)
+    cal_box2 = pad_box_dict.get(cal_pad2_key)
+    print(f"[x_align] Calibration pads: {cal_pad1_key} / {cal_pad2_key}")
  
     # Validate we have what we need
     if target_pad_box is None:
@@ -751,13 +762,14 @@ def x_align(target_pad_number=1, known_µm=None, tolerance_µm=10):
 # --------------------------------------------------------
 # R-axis alignment: measure angle in degrees using compute_angle_between
 # --------------------------------------------------------
-def r_align(angle_tolerance=0.5):
+def r_align(angle_tolerance=0.5, reference_angle=0.0):
     """
-    1) Check we have CF_Tip (last_cf_box) and GC_Tip (last_gc_box).
-    2) Compute angle_degs from compute_angle_between(...), which you set to return 
-        the correct sign for a direct rotation on axis 'r'.
-    3) If abs(angle_degs) < angle_tolerance => print "already aligned" and return.
-    4) Else, update_speed(1), rotate 'r' axis by angle_degs, then re-check and print final angle.
+    Rotates the 'r' axis to bring the CF→GC angle within `angle_tolerance` degrees
+    of `reference_angle` (default 0°).
+
+    Pass reference_angle=<value from a previous r_align call> so that successive
+    corrections in the stabilisation loop fix only the delta instead of the
+    absolute angle, preventing oscillation.
     """
     from motor_control import update_speed, move_linear_stage
     global last_cf_box, last_gc_box
@@ -773,21 +785,22 @@ def r_align(angle_tolerance=0.5):
         print("[r_align] No GC_Tip bounding box stored yet. Cannot align r-axis.")
         return
       
-    # 1) Compute the initial angle
+    # 1) Compute current angle and delta from reference
     initial_angle_degs = compute_angle_between(last_cf_box, last_gc_box)
-    print(f"[r_align] Initial angle: {initial_angle_degs:.2f}°")
+    angle_delta = initial_angle_degs - reference_angle
+    print(f"[r_align] Current angle: {initial_angle_degs:.2f}°  "
+          f"reference: {reference_angle:.2f}°  delta: {angle_delta:.2f}°")
  
-    # 2) Check tolerance
-    if abs(initial_angle_degs) <= angle_tolerance:
-        print(f"[r_align] Already within ±{angle_tolerance}° => no rotation needed.")
+    # 2) Check tolerance against delta
+    if abs(angle_delta) <= angle_tolerance:
+        print(f"[r_align] Within ±{angle_tolerance}° of reference => no rotation needed.")
         r_align_done = True
         return
  
-    # 3) Move the 'r' axis by that angle (assuming sign is correct as you said)
-    direction = '+'
-    displacement = abs(initial_angle_degs)
-    if initial_angle_degs < 0:
-        direction = '-'
+    # 3) Move the 'r' axis by the delta.
+    # Sign convention: positive delta => '-', negative delta => '+' (motor direction is inverted).
+    direction = '-' if angle_delta >= 0 else '+'
+    displacement = abs(angle_delta)
     print(f"[r_align] Rotating r-axis by {direction}{displacement:.2f}°...")
     move_linear_stage('r', direction, displacement, wait_for_stop=True, max_wait=30.0)
     r_align_done = True

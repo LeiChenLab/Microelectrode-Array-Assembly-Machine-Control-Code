@@ -481,8 +481,11 @@ def return_to_origin():
             continue
         origin_pos = axis_origins[ax]
         diff = origin_pos - current_pos
-        direction = '+' if diff >= 0 else '-'
         displacement = abs(diff)
+        if displacement < 10.0:
+            print(f"Axis {ax}: already at origin ({current_pos:.3f}), skipping.")
+            continue
+        direction = '+' if diff >= 0 else '-'
         print(f"Moving axis {ax} from {current_pos:.3f} to {origin_pos:.3f}...")
         move_linear_stage(ax, direction, displacement, wait_for_stop=True, max_wait=30.0)
     print("--- Finished Moving All Axes ---\n")

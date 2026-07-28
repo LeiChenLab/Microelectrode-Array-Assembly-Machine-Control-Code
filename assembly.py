@@ -114,6 +114,17 @@ def save_connector_print_offset(offset_dict):
     _connector_print_offset = offset_dict if offset_dict else None
     _save_origin('connector_print_offset', offset_dict)
 
+def _already_at_origin(origin_dict, tolerance=10.0):
+    """Return True if every axis in origin_dict is already within `tolerance` units
+    of its target value.  Used to skip unnecessary Z-drop/navigation moves."""
+    for ax, target in origin_dict.items():
+        cur = get_current_position(ax)
+        if cur is None:
+            return False
+        if abs(cur - target) > tolerance:
+            return False
+    return True
+
 def _navigate_to_saved_origin(origin_dict, axes):
     """Move to a saved origin with camera-fixture-safe axis ordering.
 
@@ -121,6 +132,9 @@ def _navigate_to_saved_origin(origin_dict, axes):
     Departing FROM microwire: Z drop 15000 → Y → X → r → Z(target)
     All other moves:          Z drop 5000  → non-Z axes (given order) → Z(target)
     """
+    if _already_at_origin(origin_dict):
+        print("[Navigate] Already at target origin — skipping navigation.")
+        return
     def _move(ax, val):
         _abort_if_emergency_stop()
         cur = get_current_position(ax)
