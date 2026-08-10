@@ -48,6 +48,59 @@ extrude_done = False
 r_align_done = False
 x_align_done = False
 
+auto_annotate = False
+ANNOTATION_DIR = r"D:\Labeled_images"
+
+def _save_yolo_annotation(still_path, results, img_w, img_h):
+    """Write a YOLO-format .txt annotation alongside a saved still frame."""
+    os.makedirs(ANNOTATION_DIR, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(still_path))[0]
+    txt_path = os.path.join(ANNOTATION_DIR, stem + ".txt")
+    lines = []
+    for box in results.boxes:
+        cls_id = int(box.cls[0])
+        x1, y1, x2, y2 = box.xyxy[0].tolist()
+        cx = ((x1 + x2) / 2) / img_w
+        cy = ((y1 + y2) / 2) / img_h
+        bw = (x2 - x1) / img_w
+        bh = (y2 - y1) / img_h
+        lines.append(f"{cls_id} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
+    with open(txt_path, 'w') as f:
+        f.write('\n'.join(lines))
+
+_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+
+def annotate_folder(folder_path, model_path="best.pt", conf=0.5, progress_callback=None):
+    """
+    Run the YOLO model on every image in folder_path and write YOLO .txt
+    annotations to ANNOTATION_DIR.  progress_callback(done, total, filename)
+    is called after each image if provided.
+    Returns (annotated_count, skipped_count).
+    """
+    image_files = [
+        f for f in os.listdir(folder_path)
+        if os.path.splitext(f)[1].lower() in _IMAGE_EXTS
+    ]
+    total = len(image_files)
+    model = YOLO(model_path)
+    annotated = 0
+    skipped = 0
+    for i, fname in enumerate(image_files):
+        img_path = os.path.join(folder_path, fname)
+        img = cv2.imread(img_path)
+        if img is None:
+            skipped += 1
+            if progress_callback:
+                progress_callback(i + 1, total, fname)
+            continue
+        img_h, img_w = img.shape[:2]
+        results = model.predict(img, conf=conf, verbose=False)
+        _save_yolo_annotation(img_path, results[0], img_w, img_h)
+        annotated += 1
+        if progress_callback:
+            progress_callback(i + 1, total, fname)
+    return annotated, skipped
+
 # Settings file path
 SETTINGS_FILE = "pcb_settings.json"
 
@@ -388,8 +441,9 @@ def open_camera(camera_index=0, model_path="best.pt"):
                         record_dir2, 
                         f"frame_{fc}_camera{camera_index}_{run_timestamps[camera_index]}.jpg"
                     )
-                # Save clean still frame without annotations
                 cv2.imwrite(still_path, frame)
+                if auto_annotate:
+                    _save_yolo_annotation(still_path, results[0], width, height)
 
             frame_counts[camera_index]+=1
         else:
@@ -397,6 +451,8 @@ def open_camera(camera_index=0, model_path="best.pt"):
                 video_writers[camera_index].release()
                 video_writers[camera_index]=None
                 print(f"[Camera {camera_index}] Recording stopped.")
+
+        # 5) Auto-annotation now runs inside the recording block above
 
         cv2.imshow(f"Camera {camera_index}", annotated_frame)
         if cv2.waitKey(1)&0xFF==ord('q'):

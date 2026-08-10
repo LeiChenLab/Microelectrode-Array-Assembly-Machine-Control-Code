@@ -6,7 +6,7 @@ import math
 import tkinter as tk
 import keyboard
 import time
-from tkinter import messagebox, Toplevel
+from tkinter import messagebox, Toplevel, filedialog
 import json
 import os
 
@@ -635,16 +635,409 @@ def toggle_bounding_boxes():
 
 def toggle_recording():
     val = record_var.get()  # 'On' or 'Off'
-    if val == 'On':
-        image_recognition.record_camera0 = True
-        image_recognition.record_camera1 = True
-        image_recognition.record_camera2 = True  
-        print("[GUI] Recording => ON for all cameras")
-    else:
-        image_recognition.record_camera0 = False
-        image_recognition.record_camera1 = False
-        image_recognition.record_camera2 = False  
-        print("[GUI] Recording => OFF for all cameras")
+    is_on = (val == 'On')
+    image_recognition.record_camera0 = is_on
+    image_recognition.record_camera1 = is_on
+    image_recognition.record_camera2 = is_on
+    image_recognition.auto_annotate   = is_on
+    print(f"[GUI] Recording => {'ON' if is_on else 'OFF'} (auto-annotate follows)")
+
+
+_FOLDER_PICKER_CS = r"""
+using System;
+using System.Runtime.InteropServices;
+using System.Collections.Generic;
+
+[ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"),
+ InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IShellItem {
+    void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+    void GetParent(out IShellItem ppsi);
+    void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+    void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+    void Compare(IShellItem psi, uint hint, out int piOrder);
+}
+
+[ComImport, Guid("B63EA76D-1F85-456F-A19C-48159EFA858B"),
+ InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IShellItemArray {
+    void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+    void GetPropertyStore(int flags, ref Guid riid, out IntPtr ppv);
+    void GetPropertyDescriptionList(IntPtr keyType, ref Guid riid, out IntPtr ppv);
+    void GetAttributes(int AttribFlags, uint sfgaoMask, out uint psfgaoAttribs);
+    void GetCount(out uint pdwNumItems);
+    void GetItemAt(uint dwIndex, out IShellItem ppsi);
+    void EnumItems(out IntPtr ppenumShellItems);
+}
+
+[ComImport, Guid("D57C7288-D4AD-4768-BE02-9D969532D960"),
+ InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IFileOpenDialog {
+    [PreserveSig] int Show(IntPtr parent);
+    void SetFileTypes(uint c, IntPtr p);
+    void SetFileTypeIndex(uint i);
+    void GetFileTypeIndex(out uint i);
+    void Advise(IntPtr p, out uint c);
+    void Unadvise(uint c);
+    void SetOptions(uint fos);
+    void GetOptions(out uint fos);
+    void SetDefaultFolder(IShellItem psi);
+    void SetFolder(IShellItem psi);
+    void GetFolder(out IShellItem ppsi);
+    void GetCurrentSelection(out IShellItem ppsi);
+    void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string s);
+    void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string s);
+    void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string s);
+    void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string s);
+    void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string s);
+    void GetResult(out IShellItem ppsi);
+    void AddPlace(IShellItem psi, int fdap);
+    void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string s);
+    void Close(int hr);
+    void SetClientGuid(ref Guid g);
+    void ClearClientData();
+    void SetFilter(IntPtr p);
+    void GetResults(out IShellItemArray ppenum);
+    void GetSelectedItems(out IShellItemArray ppsai);
+}
+
+public static class FolderPicker {
+    [DllImport("ole32.dll")]
+    static extern int CoCreateInstance(ref Guid rclsid, IntPtr o, uint ctx,
+                                       ref Guid riid,
+                                       [MarshalAs(UnmanagedType.IUnknown)] out object ppv);
+    [DllImport("shell32.dll", CharSet=CharSet.Unicode)]
+    static extern int SHCreateItemFromParsingName(string pszPath, IntPtr pbc, ref Guid riid, out IShellItem ppv);
+    public static string[] Pick(string title, string initialDir) {
+        Guid clsid = new Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7");
+        Guid iid   = new Guid("D57C7288-D4AD-4768-BE02-9D969532D960");
+        object obj;
+        if (CoCreateInstance(ref clsid, IntPtr.Zero, 1, ref iid, out obj) != 0)
+            return new string[0];
+        var dlg = (IFileOpenDialog)obj;
+        uint opt; dlg.GetOptions(out opt);
+        // FOS_PICKFOLDERS=0x20 | FOS_ALLOWMULTISELECT=0x200 | FOS_FORCEFILESYSTEM=0x40
+        dlg.SetOptions(opt | 0x20u | 0x200u | 0x40u);
+        dlg.SetTitle(title);
+        if (!string.IsNullOrEmpty(initialDir)) {
+            Guid siid = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+            IShellItem folder;
+            if (SHCreateItemFromParsingName(initialDir, IntPtr.Zero, ref siid, out folder) == 0)
+                dlg.SetFolder(folder);
+        }
+        if (dlg.Show(IntPtr.Zero) != 0) return new string[0];
+        IShellItemArray items; dlg.GetResults(out items);
+        uint count; items.GetCount(out count);
+        var result = new List<string>();
+        for (uint i = 0; i < count; i++) {
+            IShellItem item; items.GetItemAt(i, out item);
+            string path; item.GetDisplayName(0x80058000u, out path);
+            result.Add(path);
+        }
+        return result.ToArray();
+    }
+}
+"""
+
+def _pick_multiple_folders_windows(title="Select Folders", initialdir=r"D:\\"):
+    """Windows-only: IFileOpenDialog multi-select folder picker via PowerShell.
+    Returns a list of selected paths, or None if the approach is unavailable."""
+    import subprocess
+    escaped_title = title.replace('"', '`"')
+    escaped_init  = (initialdir or "").replace('"', '`"')
+    ps = f'Add-Type @\'\n{_FOLDER_PICKER_CS}\n\'@\n[FolderPicker]::Pick("{escaped_title}", "{escaped_init}") | Write-Output'
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            return None
+        return [p.strip() for p in result.stdout.splitlines() if p.strip()]
+    except Exception as e:
+        print(f"[FolderPicker] PowerShell approach failed: {e}")
+        return None
+
+
+def open_batch_annotate_window(root):
+    """Popup that lets the user pick one or more folders and batch-annotate images."""
+    win = Toplevel(root)
+    win.title("Batch Annotate Folders")
+    win.resizable(False, False)
+
+    # Folder list
+    tk.Label(win, text="Image Folders:").grid(row=0, column=0, padx=10, pady=(10, 2), sticky='w')
+
+    list_frame = tk.Frame(win)
+    list_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 4), sticky='ew')
+    scrollbar = tk.Scrollbar(list_frame, orient='vertical')
+    folder_listbox = tk.Listbox(list_frame, width=48, height=5, yscrollcommand=scrollbar.set,
+                                selectmode='single')
+    scrollbar.config(command=folder_listbox.yview)
+    folder_listbox.pack(side='left', fill='both', expand=True)
+    scrollbar.pack(side='right', fill='y')
+
+    def add_folder():
+        paths = _pick_multiple_folders_windows(
+            title="Select image folders (Ctrl/Shift to multi-select)",
+            initialdir=r"D:\\"
+        )
+        if paths is None:
+            # Fallback: PowerShell unavailable
+            p = filedialog.askdirectory(title="Select folder containing images",
+                                        initialdir=r"D:\\", parent=win)
+            paths = [p] if p else []
+        existing = set(folder_listbox.get(0, 'end'))
+        for path in paths:
+            if path and path not in existing:
+                folder_listbox.insert('end', path)
+                existing.add(path)
+
+    def remove_folder():
+        sel = folder_listbox.curselection()
+        if sel:
+            folder_listbox.delete(sel[0])
+
+    btn_col = tk.Frame(win)
+    btn_col.grid(row=1, column=2, padx=(0, 10), pady=(0, 4), sticky='n')
+    tk.Button(btn_col, text="Add\u2026",   width=10, command=add_folder).pack(pady=(0, 4))
+    tk.Button(btn_col, text="Remove", width=10, command=remove_folder).pack()
+
+    # Confidence threshold
+    tk.Label(win, text="Confidence threshold:").grid(row=2, column=0, padx=10, pady=4, sticky='w')
+    conf_var = tk.DoubleVar(value=0.5)
+    conf_slider = tk.Scale(win, from_=0.05, to=0.95, resolution=0.05,
+                           orient='horizontal', variable=conf_var, length=200)
+    conf_slider.grid(row=2, column=1, columnspan=2, padx=(0, 10), pady=4, sticky='w')
+
+    # Progress bar + status label
+    progress_bar = tk.Canvas(win, width=380, height=18, bg='#ddd', highlightthickness=1,
+                              highlightbackground='#aaa')
+    progress_bar.grid(row=3, column=0, columnspan=3, padx=10, pady=(8, 2))
+    status_var = tk.StringVar(value="Ready.")
+    tk.Label(win, textvariable=status_var, anchor='w').grid(
+        row=4, column=0, columnspan=3, padx=10, pady=(0, 6), sticky='w')
+
+    _bar_fill = progress_bar.create_rectangle(0, 0, 0, 18, fill='#4caf50', width=0)
+
+    def _update_bar(fraction):
+        progress_bar.coords(_bar_fill, 0, 0, 380 * fraction, 18)
+
+    run_btn = tk.Button(win, text="Run Annotation")
+    run_btn.grid(row=5, column=0, columnspan=3, pady=(4, 12))
+
+    def _run():
+        folders = list(folder_listbox.get(0, 'end'))
+        if not folders:
+            messagebox.showerror("No folders", "Add at least one image folder.", parent=win)
+            return
+        invalid = [f for f in folders if not os.path.isdir(f)]
+        if invalid:
+            messagebox.showerror("Invalid folder",
+                                 "The following paths are not valid directories:\n" +
+                                 "\n".join(invalid), parent=win)
+            return
+        conf = round(conf_var.get(), 2)
+        run_btn.config(state='disabled')
+        status_var.set("Running…")
+        _update_bar(0)
+
+        def worker():
+            total_annotated = 0
+            total_skipped = 0
+            try:
+                for folder_idx, folder in enumerate(folders):
+                    folder_name = os.path.basename(folder)
+
+                    def progress_cb(done, total, fname, _fi=folder_idx, _fn=folder_name):
+                        # Overall fraction: completed folders + current folder progress
+                        overall = (_fi + (done / total if total else 1.0)) / len(folders)
+                        win.after(0, lambda f=overall: _update_bar(f))
+                        win.after(0, lambda: status_var.set(
+                            f"[{_fi + 1}/{len(folders)}] {_fn}  —  {done}/{total}  {fname}"))
+
+                    annotated, skipped = image_recognition.annotate_folder(
+                        folder, conf=conf, progress_callback=progress_cb)
+                    total_annotated += annotated
+                    total_skipped += skipped
+
+                win.after(0, lambda: _update_bar(1.0))
+                win.after(0, lambda: status_var.set(
+                    f"Done. {total_annotated} annotated, {total_skipped} skipped across "
+                    f"{len(folders)} folder(s). Labels saved to {image_recognition.ANNOTATION_DIR}"))
+            except Exception as exc:
+                win.after(0, lambda: status_var.set(f"Error: {exc}"))
+            finally:
+                win.after(0, lambda: run_btn.config(state='normal'))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    run_btn.config(command=_run)
+
+    tk.Button(
+        win, text="Sort into YOLO Dataset…",
+        command=lambda: open_sort_dataset_window(win, lambda: list(folder_listbox.get(0, 'end')))
+    ).grid(row=6, column=0, columnspan=3, pady=(0, 4))
+
+    tk.Button(
+        win, text="Start YOLO Training…",
+        command=lambda: open_training_window(win)
+    ).grid(row=7, column=0, columnspan=3, pady=(0, 10))
+
+
+def open_sort_dataset_window(parent_win, get_folders_fn):
+    """Sort annotated image+label pairs into a YOLO train/val dataset split."""
+    import random
+    import shutil
+
+    win = Toplevel(parent_win)
+    win.title("Sort into YOLO Dataset")
+    win.resizable(False, False)
+
+    # Dataset root
+    dest_var = tk.StringVar(value=r"D:\YOLODataset")
+    tk.Label(win, text="Dataset root:").grid(row=0, column=0, padx=10, pady=(12, 4), sticky='w')
+    tk.Entry(win, textvariable=dest_var, width=34).grid(row=0, column=1, padx=(0, 4), pady=(12, 4))
+    def browse_dest():
+        p = filedialog.askdirectory(title="Select YOLO dataset root", parent=win)
+        if p:
+            dest_var.set(p)
+    tk.Button(win, text="Browse…", command=browse_dest).grid(row=0, column=2, padx=(0, 10), pady=(12, 4))
+
+    # Train split
+    tk.Label(win, text="Train split (%):").grid(row=1, column=0, padx=10, pady=4, sticky='w')
+    split_var = tk.IntVar(value=66)
+    tk.Spinbox(win, from_=10, to=90, width=5, textvariable=split_var).grid(
+        row=1, column=1, padx=(0, 10), pady=4, sticky='w')
+
+    # Progress bar + status
+    progress_bar = tk.Canvas(win, width=380, height=18, bg='#ddd',
+                             highlightthickness=1, highlightbackground='#aaa')
+    progress_bar.grid(row=2, column=0, columnspan=3, padx=10, pady=(8, 2))
+    _bar_fill = progress_bar.create_rectangle(0, 0, 0, 18, fill='#4caf50', width=0)
+    def _update_bar(frac):
+        progress_bar.coords(_bar_fill, 0, 0, 380 * frac, 18)
+    status_var = tk.StringVar(value="Ready.")
+    tk.Label(win, textvariable=status_var, anchor='w', width=52).grid(
+        row=3, column=0, columnspan=3, padx=10, pady=(0, 6), sticky='w')
+
+    sort_btn = tk.Button(win, text="Sort")
+    sort_btn.grid(row=4, column=0, columnspan=3, pady=(4, 12))
+
+    def _sort():
+        folders = get_folders_fn()
+        dest_root = dest_var.get().strip()
+
+        if not dest_root:
+            messagebox.showerror("Error", "Please specify a dataset root folder.", parent=win)
+            return
+        if not folders:
+            messagebox.showerror("No folders",
+                "No source folders are listed in the annotate window.", parent=win)
+            return
+
+        annotation_dir = image_recognition.ANNOTATION_DIR
+        _IMG_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+
+        # Build (image_path, label_path) pairs where the label actually exists
+        pairs = []
+        seen_stems = set()
+        for folder in folders:
+            if not os.path.isdir(folder):
+                continue
+            for fname in sorted(os.listdir(folder)):
+                if os.path.splitext(fname)[1].lower() not in _IMG_EXTS:
+                    continue
+                stem = os.path.splitext(fname)[0]
+                if stem in seen_stems:
+                    continue  # skip duplicate stems across folders
+                label_path = os.path.join(annotation_dir, stem + ".txt")
+                if os.path.isfile(label_path):
+                    pairs.append((os.path.join(folder, fname), label_path))
+                    seen_stems.add(stem)
+
+        if not pairs:
+            messagebox.showinfo("No pairs found",
+                "No image+label pairs were found.\n"
+                "Run annotation first and ensure labels exist in:\n"
+                f"{annotation_dir}", parent=win)
+            return
+
+        random.shuffle(pairs)
+        train_pct = split_var.get()
+        n_train = max(1, int(len(pairs) * train_pct / 100))
+        train_pairs = pairs[:n_train]
+        val_pairs   = pairs[n_train:]
+
+        split_dirs = {
+            'train_img': os.path.join(dest_root, 'images', 'train'),
+            'val_img':   os.path.join(dest_root, 'images', 'val'),
+            'train_lbl': os.path.join(dest_root, 'labels', 'train'),
+            'val_lbl':   os.path.join(dest_root, 'labels', 'val'),
+        }
+        try:
+            for d in split_dirs.values():
+                os.makedirs(d, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not create destination folders:\n{e}", parent=win)
+            return
+
+        sort_btn.config(state='disabled')
+        _update_bar(0)
+        status_var.set("Sorting…")
+
+        def worker():
+            all_pairs = [('train', p) for p in train_pairs] + [('val', p) for p in val_pairs]
+            total = len(all_pairs)
+            errors = []
+            for i, (split, (img_src, lbl_src)) in enumerate(all_pairs):
+                try:
+                    shutil.move(img_src, os.path.join(split_dirs[f'{split}_img'],
+                                                      os.path.basename(img_src)))
+                    shutil.move(lbl_src, os.path.join(split_dirs[f'{split}_lbl'],
+                                                      os.path.basename(lbl_src)))
+                except Exception as e:
+                    errors.append(str(e))
+                win.after(0, lambda f=(i + 1) / total: _update_bar(f))
+
+            # Move any leftover files (videos, non-annotated images, etc.) to misc/
+            misc_dir = os.path.join(dest_root, 'misc')
+            misc_count = 0
+            for folder in folders + [annotation_dir]:
+                if not os.path.isdir(folder):
+                    continue
+                for fname in os.listdir(folder):
+                    src = os.path.join(folder, fname)
+                    if not os.path.isfile(src):
+                        continue
+                    os.makedirs(misc_dir, exist_ok=True)
+                    try:
+                        shutil.move(src, os.path.join(misc_dir, fname))
+                        misc_count += 1
+                    except Exception as e:
+                        errors.append(str(e))
+
+            # Delete source folders now that they are empty
+            for folder in folders + [annotation_dir]:
+                try:
+                    if os.path.isdir(folder) and not os.listdir(folder):
+                        os.rmdir(folder)
+                except Exception:
+                    pass
+
+            if errors:
+                win.after(0, lambda: status_var.set(f"{len(errors)} error(s) — first: {errors[0]}"))
+            else:
+                misc_note = f"  {misc_count} leftover file(s) → misc/." if misc_count else ""
+                win.after(0, lambda: status_var.set(
+                    f"Moved: {len(train_pairs)} train, {len(val_pairs)} val  →  {dest_root}.{misc_note}"))
+            win.after(0, lambda: sort_btn.config(state='normal'))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+
+    sort_btn.config(command=_sort)
+
 
 ###############################
 # IMAGE ADJUSTMENT SLIDER POPUP
@@ -1132,6 +1525,22 @@ def open_settings_window(root):
         command=lambda: open_connector_offset_window(root)
     ).pack(pady=6)
 
+    tk.Frame(win, height=1, bg='gray').pack(fill='x', padx=12, pady=(6, 2))
+
+    tk.Button(
+        win,
+        text="Reprint Feature",
+        width=34,
+        command=lambda: open_reprint_window(root)
+    ).pack(pady=6)
+
+    tk.Button(
+        win,
+        text="Test PNP Routine",
+        width=34,
+        command=lambda: open_pnp_test_window(root)
+    ).pack(pady=6)
+
     tk.Button(win, text="Close", command=win.destroy).pack(pady=(6, 14))
 
 
@@ -1422,6 +1831,204 @@ def open_pnp_test_window(root):
 
 
 ###############################
+# YOLO TRAINING WINDOW
+###############################
+_YOLO_EXE_DEFAULT = (
+    r"C:\Users\MINI Lab\AppData\Local\Packages"
+    r"\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0"
+    r"\LocalCache\local-packages\Python311\Scripts\yolo.exe"
+)
+_YOLO_EXE_SETTINGS_KEY = "yolo_exe_path"
+
+def _load_yolo_exe():
+    try:
+        if os.path.isfile(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                return json.load(f).get(_YOLO_EXE_SETTINGS_KEY, _YOLO_EXE_DEFAULT)
+    except Exception:
+        pass
+    return _YOLO_EXE_DEFAULT
+
+def _save_yolo_exe(path):
+    existing = {}
+    if os.path.isfile(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+    existing[_YOLO_EXE_SETTINGS_KEY] = path
+    try:
+        with open(SETTINGS_FILE, 'w') as f:
+            json.dump(existing, f, indent=2)
+    except Exception as e:
+        print(f"Warning: could not save yolo_exe_path: {e}")
+
+def open_training_window(root):
+    """Popup to configure and launch a YOLO training run with live log output."""
+    import subprocess
+    from tkinter import scrolledtext
+
+    win = Toplevel(root)
+    win.title("YOLO Training")
+    win.resizable(True, True)
+
+    _proc = [None]  # mutable container so inner functions can reference it
+
+    # ── Parameter fields ──────────────────────────────────────────────────────
+    param_frame = tk.Frame(win)
+    param_frame.pack(fill='x', padx=10, pady=(10, 4))
+
+    # YOLO exe
+    tk.Label(param_frame, text="YOLO exe:", anchor='w').grid(row=0, column=0, sticky='w', pady=3)
+    yolo_exe_var = tk.StringVar(value=_load_yolo_exe())
+    tk.Entry(param_frame, textvariable=yolo_exe_var, width=52).grid(
+        row=0, column=1, columnspan=2, sticky='ew', padx=(4, 0), pady=3)
+    def browse_exe():
+        p = filedialog.askopenfilename(
+            title="Select yolo.exe",
+            filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
+            parent=win)
+        if p:
+            yolo_exe_var.set(p)
+    tk.Button(param_frame, text="Browse\u2026", command=browse_exe).grid(
+        row=0, column=3, padx=(4, 0), pady=3)
+
+    # Model
+    tk.Label(param_frame, text="Model:", anchor='w').grid(row=1, column=0, sticky='w', pady=3)
+    model_var = tk.StringVar(value="yolov8n.pt")
+    tk.Entry(param_frame, textvariable=model_var, width=18).grid(
+        row=1, column=1, sticky='w', padx=(4, 0), pady=3)
+
+    # Data YAML
+    tk.Label(param_frame, text="Data YAML:", anchor='w').grid(row=1, column=2, sticky='w', padx=(10, 0), pady=3)
+    data_var = tk.StringVar(value="data.yaml")
+    tk.Entry(param_frame, textvariable=data_var, width=18).grid(
+        row=1, column=3, sticky='w', padx=(4, 0), pady=3)
+    def browse_yaml():
+        p = filedialog.askopenfilename(
+            title="Select data.yaml",
+            filetypes=[("YAML files", "*.yaml *.yml"), ("All files", "*.*")],
+            parent=win)
+        if p:
+            data_var.set(p)
+    tk.Button(param_frame, text="Browse\u2026", command=browse_yaml).grid(
+        row=1, column=4, padx=(4, 0), pady=3)
+
+    # Epochs + imgsz
+    tk.Label(param_frame, text="Epochs:", anchor='w').grid(row=2, column=0, sticky='w', pady=3)
+    epochs_var = tk.StringVar(value="100")
+    tk.Entry(param_frame, textvariable=epochs_var, width=8).grid(
+        row=2, column=1, sticky='w', padx=(4, 0), pady=3)
+
+    tk.Label(param_frame, text="Image size (W,H):", anchor='w').grid(
+        row=2, column=2, sticky='w', padx=(10, 0), pady=3)
+    imgsz_var = tk.StringVar(value="640,480")
+    tk.Entry(param_frame, textvariable=imgsz_var, width=10).grid(
+        row=2, column=3, sticky='w', padx=(4, 0), pady=3)
+
+    # ── Buttons ───────────────────────────────────────────────────────────────
+    btn_frame = tk.Frame(win)
+    btn_frame.pack(pady=(4, 2))
+
+    status_var = tk.StringVar(value="Idle.")
+    tk.Label(win, textvariable=status_var, anchor='w').pack(fill='x', padx=12)
+
+    # ── Log output ────────────────────────────────────────────────────────────
+    log = scrolledtext.ScrolledText(win, width=80, height=20, state='disabled',
+                                    bg='#1e1e1e', fg='#d4d4d4', font=("Courier", 9))
+    log.pack(fill='both', expand=True, padx=10, pady=(4, 10))
+
+    def _append_log(text):
+        log.config(state='normal')
+        log.insert('end', text)
+        log.see('end')
+        log.config(state='disabled')
+
+    def _stop_cameras_sync():
+        """Stop all camera threads and block until they exit (called from worker thread)."""
+        print("[Training] Stopping cameras to free GPU...")
+        for i in range(3):
+            image_recognition.camera_stop_events[i].set()
+        for i in range(3):
+            t = _camera_threads.get(i)
+            if t and t.is_alive():
+                t.join(timeout=6.0)
+        print("[Training] Cameras stopped.")
+
+    def _reader_thread(proc):
+        for line in proc.stdout:
+            win.after(0, lambda l=line: _append_log(l))
+        ret = proc.wait()
+        # Restart cameras now that the GPU is free
+        print("[Training] Restarting cameras...")
+        for i in range(3):
+            image_recognition.camera_stop_events[i].clear()
+        start_camera_threads()
+        win.after(0, lambda: status_var.set(
+            f"Training finished — exit code {ret}. Cameras restarted."))
+        win.after(0, lambda: start_btn.config(state='normal'))
+        win.after(0, lambda: stop_btn.config(state='disabled'))
+
+    def on_start():
+        exe = yolo_exe_var.get().strip()
+        if not os.path.isfile(exe):
+            messagebox.showerror("Not found",
+                f"YOLO executable not found:\n{exe}", parent=win)
+            return
+        _save_yolo_exe(exe)
+        cmd = [
+            exe, "detect", "train",
+            f"model={model_var.get().strip()}",
+            f"data={data_var.get().strip()}",
+            f"epochs={epochs_var.get().strip()}",
+            f"imgsz={imgsz_var.get().strip()}",
+        ]
+
+        start_btn.config(state='disabled')
+        stop_btn.config(state='normal')
+        status_var.set("Stopping cameras…")
+
+        def _launch():
+            _stop_cameras_sync()
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1,
+                    encoding='utf-8', errors='replace',
+                )
+            except Exception as e:
+                win.after(0, lambda: messagebox.showerror("Launch error", str(e), parent=win))
+                win.after(0, lambda: start_btn.config(state='normal'))
+                win.after(0, lambda: stop_btn.config(state='disabled'))
+                # Restore cameras if launch failed
+                for i in range(3):
+                    image_recognition.camera_stop_events[i].clear()
+                start_camera_threads()
+                return
+            _proc[0] = proc
+            win.after(0, lambda: _append_log(f"$ {' '.join(cmd)}\n\n"))
+            win.after(0, lambda: status_var.set("Training running\u2026"))
+            _reader_thread(proc)
+
+        threading.Thread(target=_launch, daemon=True).start()
+
+    def on_stop():
+        proc = _proc[0]
+        if proc and proc.poll() is None:
+            proc.terminate()
+            status_var.set("Stop requested.")
+
+    start_btn = tk.Button(btn_frame, text="Start Training", width=16, command=on_start)
+    start_btn.pack(side='left', padx=8)
+    stop_btn = tk.Button(btn_frame, text="Stop", width=10, command=on_stop, state='disabled')
+    stop_btn.pack(side='left', padx=8)
+
+    win.protocol("WM_DELETE_WINDOW", lambda: (on_stop(), win.destroy()))
+
+
+###############################
 # MAIN GUI LAUNCH
 ###############################
 def launch_gui():
@@ -1681,12 +2288,15 @@ def launch_gui():
 
     # RECORDING radio
     global record_var
-    record_var = tk.StringVar(value='Off')  # default => not recording
+    record_var = tk.StringVar(value='Off')
     record_frame = tk.Frame(root)
     record_frame.pack(pady=5)
     tk.Label(record_frame, text="Recording: ").pack(side='left')
-    tk.Radiobutton(record_frame, text="On", variable=record_var, value='On', command=toggle_recording).pack(side='left')
+    tk.Radiobutton(record_frame, text="On",  variable=record_var, value='On',  command=toggle_recording).pack(side='left')
     tk.Radiobutton(record_frame, text="Off", variable=record_var, value='Off', command=toggle_recording).pack(side='left')
+
+    tk.Button(root, text="Annotate Image Folder…",
+              command=lambda: open_batch_annotate_window(root)).pack(pady=5)
 
     # Settings hub (image adjustments + camera ports)
     tk.Button(root, text="Settings", command=lambda: open_settings_window(root)).pack(pady=5)
@@ -1707,20 +2317,6 @@ def launch_gui():
             lambda: run_full_assembly(run_calibration=bool(calib_var.get())),
             "run_full_assembly"
         )
-    ).pack(pady=5)
-
-    # Reprint a single feature (any pad or trace)
-    tk.Button(
-        root,
-        text="Reprint Feature",
-        command=lambda: open_reprint_window(root)
-    ).pack(pady=5)
-
-    # Test PNP routine
-    tk.Button(
-        root,
-        text="Test PNP Routine",
-        command=lambda: open_pnp_test_window(root)
     ).pack(pady=5)
 
     # Full manual loop
