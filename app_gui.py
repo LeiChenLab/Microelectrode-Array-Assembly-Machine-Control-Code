@@ -98,6 +98,7 @@ keyboard_control_enabled = False
 routine_thread = None
 laser_state_var = None
 nord_state_var = None
+rec_cam_vars = {0: None, 1: None, 2: None}
 
 axis_controls = {
     'w': ('Y', '-'),
@@ -410,65 +411,70 @@ def run_full_manual_loop():
         PAD1_SEARCH_UM = 1500     # µm per search step
 
         # ── Per-loop helpers defined once, before the pad loop ────────────
-        def _find_pad(pad_key):
-            """Inch X until pad_key appears in YOLO detections."""
-            if image_recognition.pad_box_dict.get(pad_key) is not None:
-                return
-            print(f"[Loop] {pad_key} not in view — searching X...")
-            update_speed(1)
-            for _ in range(PAD1_SEARCH_STEPS):
-                _abort_if_emergency_stop()
-                time.sleep(0.5)
-                if image_recognition.pad_box_dict.get(pad_key) is not None:
-                    print(f"[Loop] {pad_key} found.")
-                    return
-                move_linear_stage("X", "-", PAD1_SEARCH_UM,
-                                  wait_for_stop=True, max_wait=10.0)
-            print(f"[Loop] Warning: {pad_key} still not visible after search.")
+        # def _find_pad(pad_key):
+        #     """Inch X until pad_key appears in YOLO detections."""
+        #     if image_recognition.pad_box_dict.get(pad_key) is not None:
+        #         return
+        #     print(f"[Loop] {pad_key} not in view — searching X...")
+        #     update_speed(1)
+        #     for _ in range(PAD1_SEARCH_STEPS):
+        #         _abort_if_emergency_stop()
+        #         time.sleep(0.5)
+        #         if image_recognition.pad_box_dict.get(pad_key) is not None:
+        #             print(f"[Loop] {pad_key} found.")
+        #             return
+        #         move_linear_stage("X", "-", PAD1_SEARCH_UM,
+        #                           wait_for_stop=True, max_wait=10.0)
+        #     print(f"[Loop] Warning: {pad_key} still not visible after search.")
 
-        def _apply_t_retraction(theta_before_deg, theta_after_deg, pad_n):
-            """Retract/extend t to compensate for CF_Tip reach change after r_align.
-            When the wire rotates by δθ the horizontal projection changes by
-            L*(cos(θ_after) - cos(θ_before)); correct only when |δθ| > 1°."""
-            if abs(theta_before_deg - theta_after_deg) <= 1.0:
-                return
-            cf_box = image_recognition.last_cf_box
-            gc_box = image_recognition.last_gc_box
-            if cf_box is None or gc_box is None:
-                print("[Correction] Missing CF/GC boxes — skipping length correction.")
-                return
-            (cx_cf, cy_cf) = image_recognition.center_of_bbox(cf_box)
-            (cx_gc, cy_gc) = image_recognition.center_of_bbox(gc_box)
-            wire_px = math.hypot(cx_cf - cx_gc, cy_cf - cy_gc)
-            n1 = min(pad_n, 7)
-            c1 = image_recognition.pad_box_dict.get(f"pad{n1}")
-            c2 = image_recognition.pad_box_dict.get(f"pad{n1 + 1}")
-            if c1 is None or c2 is None:
-                print("[Correction] Calibration pads not visible — skipping length correction.")
-                return
-            known = image_recognition.get_pad_spacing()
-            steps_pp = image_recognition.compute_steps_per_pixel(
-                c1, c2, axis='t', known_µm=known)
-            if steps_pp <= 0:
-                return
-            th_before = math.radians(theta_before_deg)
-            th_after  = math.radians(theta_after_deg)
-            delta_px  = wire_px * (math.cos(th_after) - math.cos(th_before))
-            if abs(delta_px) < 0.1:
-                return
-            direction  = '-' if delta_px > 0 else '+'
-            retract_µm = steps_to_µm(abs(delta_px) * steps_pp, axis='t')
-            print(f"[Correction] θ {theta_before_deg:.2f}°→{theta_after_deg:.2f}°  "
-                  f"wire={wire_px:.1f}px  t {'retract' if direction=='-' else 'extend'} "
-                  f"{retract_µm:.1f}µm")
-            move_linear_stage('t', direction, retract_µm,
-                               wait_for_stop=True, max_wait=10.0)
+        # def _apply_t_retraction(theta_before_deg, theta_after_deg, pad_n):
+        #     """Retract/extend t to compensate for CF_Tip reach change after r_align.
+        #     When the wire rotates by δθ the horizontal projection changes by
+        #     L*(cos(θ_after) - cos(θ_before)); correct only when |δθ| > 1°."""
+        #     if abs(theta_before_deg - theta_after_deg) <= 1.0:
+        #         return
+        #     cf_box = image_recognition.last_cf_box
+        #     gc_box = image_recognition.last_gc_box
+        #     if cf_box is None or gc_box is None:
+        #         print("[Correction] Missing CF/GC boxes — skipping length correction.")
+        #         return
+        #     (cx_cf, cy_cf) = image_recognition.center_of_bbox(cf_box)
+        #     (cx_gc, cy_gc) = image_recognition.center_of_bbox(gc_box)
+        #     wire_px = math.hypot(cx_cf - cx_gc, cy_cf - cy_gc)
+        #     n1 = min(pad_n, 7)
+        #     c1 = image_recognition.pad_box_dict.get(f"pad{n1}")
+        #     c2 = image_recognition.pad_box_dict.get(f"pad{n1 + 1}")
+        #     if c1 is None or c2 is None:
+        #         print("[Correction] Calibration pads not visible — skipping length correction.")
+        #         return
+        #     known = image_recognition.get_pad_spacing()
+        #     steps_pp = image_recognition.compute_steps_per_pixel(
+        #         c1, c2, axis='t', known_µm=known)
+        #     if steps_pp <= 0:
+        #         return
+        #     th_before = math.radians(theta_before_deg)
+        #     th_after  = math.radians(theta_after_deg)
+        #     delta_px  = wire_px * (math.cos(th_after) - math.cos(th_before))
+        #     if abs(delta_px) < 0.1:
+        #         return
+        #     direction  = '-' if delta_px > 0 else '+'
+        #     retract_µm = steps_to_µm(abs(delta_px) * steps_pp, axis='t')
+        #     print(f"[Correction] θ {theta_before_deg:.2f}°→{theta_after_deg:.2f}°  "
+        #           f"wire={wire_px:.1f}px  t {'retract' if direction=='-' else 'extend'} "
+        #           f"{retract_µm:.1f}µm")
+        #     move_linear_stage('t', direction, retract_µm,
+        #                        wait_for_stop=True, max_wait=10.0)
 
         for pad_num in range(1, PAD_COUNT+1):
             _abort_if_emergency_stop()
             print(f"--- Pad #{pad_num} ---")
             update_speed(3)
             move_linear_stage("Z", "-", 1220, wait_for_stop=True, max_wait=30.0)
+            # Clear stale YOLO detections so alignment steps see the current camera view
+            image_recognition.pad_box_dict.clear()
+            image_recognition.last_cf_box = None
+            image_recognition.last_gc_box = None
+            time.sleep(1.5)
 
             # ── Initial extrude + r_align ─────────────────────────────────
             # Capture the raw angle BEFORE the first r_align — this becomes the
@@ -496,13 +502,13 @@ def run_full_manual_loop():
                 raise RuntimeError("Emergency stop requested.")
             # Compensate for the change in CF_Tip horizontal reach caused by
             # rotating from r_ref_angle to ~0°.
-            _apply_t_retraction(r_ref_angle, 0.0, pad_num)
+            # _apply_t_retraction(r_ref_angle, 0.0, pad_num)
 
             target_pad_key = f"pad{pad_num}"
 
             # ── Stabilisation loop (only when r_align moved padN out of view) ──
             if image_recognition.pad_box_dict.get(target_pad_key) is None:
-                _find_pad(target_pad_key)
+                # _find_pad(target_pad_key)
                 for stab_iter in range(MAX_STAB_PASSES):
                     _abort_if_emergency_stop()
                     print(f"[Loop] Stabilisation pass {stab_iter + 1}/{MAX_STAB_PASSES}")
@@ -526,8 +532,8 @@ def run_full_manual_loop():
                         r_align(reference_angle=r_ref_angle)
                         if not wait_for_r_align_done():
                             raise RuntimeError("Emergency stop requested.")
-                        _apply_t_retraction(current_angle, r_ref_angle, pad_num)
-                        _find_pad(target_pad_key)
+                        # _apply_t_retraction(current_angle, r_ref_angle, pad_num)
+                        # _find_pad(target_pad_key)
                     else:
                         print("[Loop] Warning: CF/GC tip missing, skipping angle re-check.")
                         break
@@ -543,15 +549,18 @@ def run_full_manual_loop():
                 raise RuntimeError("Emergency stop requested.")
 
             _abort_if_emergency_stop()
-            update_speed(1)
-            move_linear_stage("Z", "+", 1220, wait_for_stop=True, max_wait=30.0)
+            update_speed(3)
+            move_linear_stage("Z", "+", 1720, wait_for_stop=True, max_wait=30.0)
             print(f"Laser cutting on Pad #{pad_num}")
             _abort_if_emergency_stop()
             laser_cut()
 
             # Return to origin after finishing this pad
             _abort_if_emergency_stop()
-            return_to_origin()
+            # Use the microwire named-origin navigation (same as the manual
+            # 'Return to Origin' button) so we truly return to the saved origin.
+            _return_to_named_origin_thread('microwire')
+            time.sleep(1.0)  # settle before next pad
 
         print("--- Automated Routine Completed ---")
 
@@ -636,9 +645,9 @@ def toggle_bounding_boxes():
 def toggle_recording():
     val = record_var.get()  # 'On' or 'Off'
     is_on = (val == 'On')
-    image_recognition.record_camera0 = is_on
-    image_recognition.record_camera1 = is_on
-    image_recognition.record_camera2 = is_on
+    image_recognition.record_camera0 = is_on and bool(rec_cam_vars[0].get())
+    image_recognition.record_camera1 = is_on and bool(rec_cam_vars[1].get())
+    image_recognition.record_camera2 = is_on and bool(rec_cam_vars[2].get())
     image_recognition.auto_annotate   = is_on
     print(f"[GUI] Recording => {'ON' if is_on else 'OFF'} (auto-annotate follows)")
 
@@ -1007,6 +1016,8 @@ def open_sort_dataset_window(parent_win, get_folders_fn):
                 if not os.path.isdir(folder):
                     continue
                 for fname in os.listdir(folder):
+                    if fname == 'classes.txt':
+                        continue
                     src = os.path.join(folder, fname)
                     if not os.path.isfile(src):
                         continue
@@ -2286,14 +2297,19 @@ def launch_gui():
     tk.Radiobutton(box_frame, text="On", variable=box_var, value='On', command=toggle_bounding_boxes).pack(side='left')
     tk.Radiobutton(box_frame, text="Off", variable=box_var, value='Off', command=toggle_bounding_boxes).pack(side='left')
 
-    # RECORDING radio
-    global record_var
+    # RECORDING radio + per-camera checkboxes
+    global record_var, rec_cam_vars
     record_var = tk.StringVar(value='Off')
+    rec_cam_vars = {0: tk.IntVar(value=1), 1: tk.IntVar(value=0), 2: tk.IntVar(value=0)}
     record_frame = tk.Frame(root)
     record_frame.pack(pady=5)
     tk.Label(record_frame, text="Recording: ").pack(side='left')
     tk.Radiobutton(record_frame, text="On",  variable=record_var, value='On',  command=toggle_recording).pack(side='left')
     tk.Radiobutton(record_frame, text="Off", variable=record_var, value='Off', command=toggle_recording).pack(side='left')
+    tk.Label(record_frame, text="   Cameras:").pack(side='left')
+    for i in range(3):
+        tk.Checkbutton(record_frame, text=f"Cam{i}",
+                       variable=rec_cam_vars[i], command=toggle_recording).pack(side='left', padx=2)
 
     tk.Button(root, text="Annotate Image Folder…",
               command=lambda: open_batch_annotate_window(root)).pack(pady=5)
